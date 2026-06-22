@@ -48,8 +48,16 @@ OPT_LAYER = 26            # [DATA] es_log.json opt_layer_indices=[26]
 MAX_TURNS = 5             # [DATA] es_log.json max_turns=5
 ROLE_NAMES = ["Worker", "Thinker", "Verifier"]   # [CODE] index order (Python: solver/thinker/verifier)
 
-# All three roles SHARE one system prompt; the role distinction is in how the
-# USER message is constructed, not in the system prompt. Verbatim from core.py
+# The router conditions on its OWN system prompt + the evolving question;
+# workers share the assistant SYSTEM_PROMPT. Verbatim from core.py. [CODE/FB]
+ROUTER_SYSTEM_PROMPT = (
+    "You are a message dispatcher whose job is to coordinate {num_agents} agents "
+    "to solve a problem. You check the problem and the discussion history and then "
+    "decide which agent should respond next. Your first generated token's hidden "
+    "state will be used as signal for decision making.")
+
+# All three WORKER roles SHARE one system prompt; the role distinction is in how
+# the USER message is constructed, not in the system prompt. Verbatim from core.py
 # (DEFAULT_SYSTEM_PROMPT / DEFAULT_THINKER_PROMPT / DEFAULT_VERIFICATION_PROMPT). [CODE]
 SYSTEM_PROMPT = ("You are a helpful assistant. You first think about the reasoning "
                  "process in the mind and then provide the user with the answer.")
@@ -270,22 +278,24 @@ class RunResult:
 
 
 class Coordinator:
-    """Runs the bounded multi-turn TRINITY loop over a FuguRouter + worker pool.
+    """Per-step TRINITY coordination loop, faithful to step_trinity (core.py).
 
-    Faithful to step_trinity (core.py):
-      - each turn: route -> role -> build role-specific messages -> dispatch worker
-      - role messages mirror _format_agent/thinker/verifier_messages: a shared
-        system prompt + a role-built user message (solver=query[+suggestion],
-        thinker=THINKER_PROMPT(info=query+response), verifier=VERIFICATION_PROMPT
-        (query, response)) [CODE]
-      - a Thinker emits <suggestion> + <suggested_role>; the role OVERRIDES the
-        next turn and the suggestion is passed to the next worker [CODE]
-      - terminate when a Verifier replies ACCEPT (vs REJECT), or at max_turns [CODE]
+    Each turn:
+      - the ROUTER conditions on [ROUTER_SYSTEM_PROMPT, {user: obs}] where `obs`
+        is the question plus the <reference_thought_N> of prior SOLVER turns —
+        a single evolving user message, not a stack of turns [F1, FC]
+      - route -> (agent_id, role_id), two independent argmax/samples [F4]
+      - role-specific worker messages mirror _format_agent/thinker/verifier [CODE]
+      - SOLVER (role 0): its full reply is the answer / verifier input; its
+        <think> thought is appended to `obs` as <reference_thought_N> [F2, FC]
+      - THINKER (role 1): emits <suggestion> + <suggested_role> (overrides next
+        turn); does NOT update obs [FC]
+      - VERIFIER (role 2): ACCEPT terminates; does NOT update obs [FC]
+      - terminate on Verifier ACCEPT or max_turns
 
-    `suppress_cold_verifier` (deliberate deviation): on turns with no worker
-    response yet, a Verifier pick is a no-op that would end the run at turn 0, so
-    we re-route it to Worker. Set False to reproduce the raw step_trinity
-    behavior (terminate with no response).
+    `suppress_cold_verifier` (deliberate deviation): a Verifier picked before any
+    solver response is a no-op that would end the run at turn 0, so we re-route it
+    to Worker. Set False to reproduce raw step_trinity (terminate with no response).
     """
     def __init__(self, router: FuguRouter, worker: WorkerFn,
                  max_turns: int = MAX_TURNS, stop_token: str = "ACCEPT",
@@ -295,15 +305,21 @@ class Coordinator:
         self.suppress_cold_verifier = suppress_cold_verifier
 
     def run(self, query: str, verbose: bool = False) -> RunResult:
-        # router reads the running transcript; workers get role-specific messages
-        transcript = [{"role": "user", "content": query}]
+        # Per-step coordination, faithful to step_trinity. The router conditions
+        # on a SINGLE evolving user message (the question + accumulated solver
+        # thoughts), NOT a stack of turns. [F1: messages = [system, user]]
+        obs = query                            # the evolving router observation (messages[1].content)
+        ref_id = 0                             # <reference_thought_N> counter [core.py:495]
         res = RunResult(final="")
-        last_response: str | None = None      # latest solver output (self.response in core.py)
-        suggestion: str | None = None         # thinker's <suggestion> for the next worker
-        suggested_role: str | None = None     # thinker's <suggested_role> override
+        last_response: str | None = None       # self.response — full latest solver output
+        suggestion: str | None = None          # thinker's <suggestion> for next worker
+        suggested_role: str | None = None      # thinker's <suggested_role> override
 
         for t in range(self.max_turns):
-            r = self.router.route(transcript, sample=self.sample)
+            # router sees [system_router, {user: obs}] — obs carries prior solver thoughts
+            route_msgs = [{"role": "system", "content": ROUTER_SYSTEM_PROMPT.format(num_agents=N_AGENTS)},
+                          {"role": "user", "content": obs}]
+            r = self.router.route(route_msgs, sample=self.sample)
             role = r["role_name"]
             if suggested_role:                      # thinker override consumes here [CODE]
                 role, suggested_role = suggested_role, None
@@ -316,21 +332,24 @@ class Coordinator:
                     res.terminated_by = "verifier_no_response"
                     break
 
-            # build the role-specific messages, mirroring core.py's three formatters [CODE]
+            # role-specific worker messages (mirror _format_agent/thinker/verifier) [CODE]
             msgs = self._format_messages(role, query, last_response, suggestion)
             reply = self.worker(role, msgs, agent_id)
-            transcript.append({"role": "assistant", "content": reply})
             res.turns.append(Turn(t, agent_id, role, reply))
             if verbose:
-                print(f"  turn {t}: agent={agent_id}({DEFAULT_SLOT_LABELS[agent_id]}) "
-                      f"role={role}\n    {reply[:90]}")
+                print(f"  turn {t}: agent={agent_id} role={role}  {reply[:80]}")
 
-            if role == "Worker":
-                last_response = reply               # update latest solver response
-                suggestion = None                   # consumed
-            elif role == "Thinker":
+            if role == "Worker":                    # solver (role_id 0)
+                last_response = reply               # full output = answer / verifier input [F2]
+                suggestion = None
+                # only the SOLVER updates the router obs, via <reference_thought_N> [FC]
+                thought = self._extract_thought(reply)
+                if thought:
+                    obs += f"\n<reference_thought_{ref_id}>{thought}</reference_thought_{ref_id}>"
+                    ref_id += 1
+            elif role == "Thinker":                 # role_id 1 — does NOT update obs [FC]
                 suggested_role, suggestion = self._parse_thinker(reply)
-            elif role == "Verifier":
+            elif role == "Verifier":                # role_id 2 — does NOT update obs [FC]
                 suggestion = None
                 if self._parse_verification(reply):
                     res.final = last_response or reply
@@ -341,6 +360,16 @@ class Coordinator:
         if not res.terminated_by:
             res.terminated_by = "max_turns"
         return res
+
+    @staticmethod
+    def _extract_thought(reply: str) -> str:
+        """Mirror _get_obs: take the <think>...</think> content; if absent, the
+        whole reply (minus stray think tags). [core.py:478-485]"""
+        import re
+        m = re.search(r"<think>([\s\S]*?)</think>", reply, re.I)
+        if m:
+            return m.group(1).strip()
+        return reply.replace("<think>", "").replace("</think>", "").strip()
 
     def _format_messages(self, role, query, last_response, suggestion):
         """Role-specific messages, faithful to core.py's _format_agent/thinker/
