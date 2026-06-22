@@ -1,0 +1,48 @@
+OpenFugu
+Copyright 2026 The OpenFugu Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this project except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+ATTRIBUTION & THIRD-PARTY MATERIAL
+================================================================================
+
+OpenFugu is an independent, open reverse-engineering and reimplementation of
+the ideas behind Sakana AI's "Fugu" orchestrator family. It is NOT affiliated
+with, endorsed by, or derived from Sakana AI's proprietary product code.
+
+This repository contains ONLY original code, documentation, and analysis
+authored by the OpenFugu contributors. It deliberately does NOT redistribute any
+third-party source, weights, or datasets. Those are fetched at setup time by
+`scripts/fetch_artifacts.py` directly from their original, licensed sources:
+
+1. TRINITY: An Evolved LLM Coordinator (arXiv:2512.04695), Sakana AI.
+   - The released router checkpoint `model_iter_60.npy` and the 37-case eval
+     fixture are pulled from the third-party HuggingFace dataset
+     `nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b` (MIT) and the
+     authors' code submission. Not redistributed here.
+
+2. Learning to Orchestrate Agents in Natural Language with the Conductor
+   (arXiv:2512.04388), Sakana AI. Referenced for the Conductor mechanism.
+
+3. trinity_coordinator (github.com/nshkrdotcom/trinity_coordinator, MIT) —
+   source of the routing eval fixture used by `verify/verify_37.py`.
+
+4. Backbone model: Qwen/Qwen3-0.6B (Apache-2.0), Alibaba Cloud.
+
+5. Worker pool: any OpenAI-compatible / litellm-supported models. Credentials
+   are supplied by the user via environment variables and never stored.
+
+================================================================================
+TRAINED WEIGHTS
+================================================================================
+
+The Conductor checkpoint trained by this project (`openfugu-conductor-*`) is a
+fine-tune of Meta's Llama-3.2-3B-Instruct and is therefore subject to the
+LLAMA 3.2 COMMUNITY LICENSE AGREEMENT (https://llama.com/llama3_2/license/),
+in addition to Apache-2.0 for the surrounding OpenFugu code. The weights are
+distributed separately on HuggingFace, not in this git repository.

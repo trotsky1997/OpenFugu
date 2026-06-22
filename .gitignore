@@ -1,0 +1,27 @@
+# caches / build
+__pycache__/
+*.pyc
+.md/
+*.egg-info/
+.venv/
+venv/
+
+# fetched third-party material — NEVER commit (pulled by scripts/fetch_artifacts.py)
+artifacts/
+*.npy
+*.safetensors
+qwen_router_prompt_eval_cases.json
+models/
+checkpoints/
+
+# secrets — credentials only ever come from env vars
+.env
+*.key
+*_key*
+secrets*
+
+# local outputs
+results/*.out
+*.log
+conductor_*_out/
+conductor_toolscale_*/

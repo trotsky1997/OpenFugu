@@ -1,0 +1,17 @@
+defaults:
+  - base
+  - _self_
+
+data_log_name: toolscale_${data_limit}
+dataset_id_or_path: nvidia/ToolScale
+data_limit: 4000
+
+make_dataset_fn:
+  _target_: custom_data.toolscale_data.make_datasets
+  data_limit: ${data_limit}
+  seed: ${seed}
+
+reward_fns:
+  _target_: custom_data.toolscale_data.make_reward_functions
+  output_dir: ${output_dir}
+  include_format_reward: true
