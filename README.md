@@ -77,6 +77,13 @@ python openfugu/serve.py --model <qwen3-0.6b dir> --vector model_iter_60.npy \
 python eval/serve_e2e.py --model <qwen3-0.6b dir> --vector model_iter_60.npy \
   --head trinity_perstep.npy --local-models "<llama dir>,<gemma dir>"   # -> answer 72, PASS
 
+# PIPELINE: train -> serve -> verify in ONE command (the head served is the head just trained)
+python pipeline/e2e_train_serve.py --model <qwen3-0.6b dir> --vector model_iter_60.npy \
+  --local-models "<llama dir>,<gemma dir>" --port 8097      # trains a fresh head, serves it, PASS
+# serve+verify only, reusing an existing head:
+python pipeline/e2e_train_serve.py --skip-train --head trinity_perstep.npy \
+  --model <qwen3-0.6b dir> --local-models "<llama dir>,<gemma dir>"
+
 # EVAL: does orchestration beat the best single model? (the central Fugu claim)
 python eval/eval_orchestration.py        # trained coordinator +107% over best single, PASS
 ```

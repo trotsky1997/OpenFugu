@@ -220,3 +220,28 @@ This closes the read→run→train→serve loop on real artifacts: the head trai
 `train_trinity_perstep.py` is the head being served, the workers it routes to are
 the real local models it was trained against, and the answer is produced by the
 full multi-turn coordinator behind one OpenAI-compatible endpoint.
+
+## One-command pipeline — train → serve → verify on a fresh head
+
+`pipeline/e2e_train_serve.py` is the full product loop in one command. It trains
+a per-step TRINITY head, then serves **that exact freshly-trained head** over the
+real local worker pool and verifies a live request — no manual path hand-off
+between training and serving. Log: [`e2e_pipeline_run.txt`](e2e_pipeline_run.txt).
+
+```
+STAGE train:  train_trinity_perstep.py --out /tmp/fugu_head_14c24d1w.npy
+              base head rollout 0.750 -> sep-CMA 1.000  PASS
+[pipeline]    trained head ready: /tmp/fugu_head_14c24d1w.npy (82048 bytes) — serving THIS head
+STAGE serve+verify:
+  [serve] applied trained head from /tmp/fugu_head_14c24d1w.npy   <- SAME path stage 1 wrote
+  [serve] worker pool: LOCAL (2): llama-3.2-3b, gemma-3-4b
+  POST /v1/chat/completions -> answer 72 (gold 72), turns=2, local=True mock=False
+[pipeline] PASS — trained a head, served THAT head over the real local pool,
+           and a live request returned the correct answer.
+```
+
+The head path written by the training stage (`/tmp/fugu_head_14c24d1w.npy`) is
+the exact path the serving stage loads — so the artifact under test is provably
+the one just produced, not a pre-baked file. This is "real end-to-end training
+and serving" as one reproducible command. (`--skip-train --head <path>` runs the
+serve+verify half alone against an existing head.)
