@@ -1,0 +1,11 @@
+[perstep] worker pool: ['deepseek-distill-7b', 'llama-3.2-3b', 'gemma-3-4b']
+[perstep] base head rollout solved=0.750  (n=8, max_turns=4)
+[iter 0] best_solved=1.000 (base 0.750)
+[iter 1] best_solved=1.000 (base 0.750)
+[iter 2] best_solved=1.000 (base 0.750)
+[iter 3] best_solved=1.000 (base 0.750)
+[iter 4] best_solved=1.000 (base 0.750)
+[iter 5] best_solved=1.000 (base 0.750)
+[result] per-step trained head solved=1.000 vs base 0.750
+[result] saved trinity_perstep.npy
+PASS — per-step sep-CMA improved the router over the multi-turn rollout

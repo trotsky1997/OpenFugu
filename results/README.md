@@ -10,8 +10,9 @@
 > `<reference_thought_N>` accumulated from earlier workers), re-routes a
 > (worker, role) action, the worker advances one step, and a verifier decides
 > termination. The per-step coordinator lives in `openfugu/mini.py` (`Coordinator`,
-> faithful to `step_trinity`); a per-step *training* loop over a real worker pool
-> is future work. The numbers below are real and reproducible, but they measure
+> faithful to `step_trinity`); the per-step *training* loop over a real worker
+> pool is `train/train_trinity_perstep.py` (results at the bottom of this file).
+> The per-question numbers below are real and reproducible, but they measure
 > query-level routing, not multi-turn coordination — labeling them "TRINITY
 > router" earlier overstated the alignment, corrected here.
 
@@ -122,3 +123,30 @@ lift precisely because it starts from a non-saturated toy policy with headroom.
 To show the gain on the real model you'd start from a weaker base or a harder
 task that leaves room to improve — the loop itself is proven to run on the real
 model. This is the last of Fugu-Ultra's mechanisms taken from mock to a real run.
+
+## Per-STEP TRINITY training — the real granularity (not per-question)
+
+`train/train_trinity_perstep.py` is the one that trains at Fugu's actual
+granularity. Every sep-CMA-ES candidate is a router head; its fitness is the
+**terminal reward of running the full per-step `Coordinator` loop** — per turn
+the router re-reads the evolving obs (question + accumulated
+`<reference_thought_N>` from prior solver turns), re-routes a (worker, role)
+action, a local worker advances one step, a verifier decides termination. This
+is what the per-question runs above are NOT. Log:
+[`trinity_perstep_run.txt`](trinity_perstep_run.txt).
+
+```
+worker pool (local, multi-vendor): deepseek-distill-7b, llama-3.2-3b, gemma-3-4b
+base router head, multi-turn rollout:  solved 0.750   (n=8, max_turns=4)
+sep-CMA-trained head:                  solved 1.000   PASS (>base)
+```
+
+This also closes the gap that the single-turn `--self-test` could not: the
+**multi-turn Coordinator loop now runs end-to-end on real weights + real
+workers** (base rollout 0.750), and sep-CMA over the head improves it.
+
+**Honest caveat — small n:** 1.000 means it routed all **8 training questions**
+correctly; this is in-sample, not held-out, so some of the lift is overfitting
+to 8 items. What's rigorously demonstrated is the *mechanism*: per-step routing
+fitness = a real multi-turn rollout, optimized gradient-free, beats the base
+head. A larger held-out eval is the scaling step, not a mechanism question.
